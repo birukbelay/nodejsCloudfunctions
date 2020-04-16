@@ -1,243 +1,237 @@
 const functions = require('firebase-functions');
-const admin = require('firebase-admin');
-
 const app = require('express')();
 // const app = express();
 
-admin.initializeApp();
+const{db}= require('./util/admin')
+
+// Signing
+const {
+    signup, 
+    login, 
+    uploadImage, 
+} =require('./handlers/signing')
+// Users
+const {   
+    addUserDetail, 
+    getAuthenticatedUser,
+    getUserDetails,   
+} = require('./handlers/users');
+// Screams
+const { 
+    getAllScreams,
+    getScream,
+    postOneScream,
+    deleteScream,    
+} = require('./handlers/screams');
+
+const{ commentOnScream} = require('./handlers/comment');
+const{ likeScream, unlikeScream} = require('./handlers/like');
+const {markNotificationsRead,} = require('./handlers/notification');
+
+//Auth 
+const FBAuth = require('./util/fbAuth');
+
+// MOCKS
+const mockFbAuth =require('./util/mock/mockFbAuth');
+
+// |==========| 1 |==============================|
+// |========= ----- user Routes  ----- ==========|
+// |---------------------------------------------|
+app.get('/user', FBAuth, getAuthenticatedUser);
+app.post('/user', FBAuth, addUserDetail);
+app.get('/user/:userName', getUserDetails);
+app.post('/notifications', FBAuth, markNotificationsRead);
+
+// |==========| 2 |==============================|
+// |========= ----- sign  routes  ----- =========|
+// |---------------------------------------------|
+app.post('/signup', signup);
+app.post('/login', login);
+app.post('/user/image', FBAuth, uploadImage);
+
+// |==========| 4 |==============================|
+// |========= ----- Scream routes ----- =========|
+// |---------------------------------------------|
+app.get('/screams', getAllScreams);
+app.get('/scream/:screamId',  getScream);
+app.post('/scream',mockFbAuth, postOneScream);
+app.delete('/scream/:screamId', FBAuth, deleteScream);
+app.put('/scream/:screamId', FBAuth, updateScream);
+
+// |==========| 5 |===============================|
+// |========= ----- Comment routes ----- =========|
+// |----------------------------------------------|
+// TODO app.get('/scream/:screamId/comments', getCommentOnScream);
+app.post('/scream/:screamId/comment',FBAuth, commentOnScream);
+//TODO app.put('/scream/:screamId/comment/:commentId',FBAuth, updateCommentOnScream);
+//TODO app.delete('/scream/:screamId/comment/:commentId',FBAuth, deleteCommentOnScream);
+
+// |==========| 6 |===============================|
+// |========= ----- Likes routes ----- ===========|
+// |----------------------------------------------|
+app.get('/scream/:screamId/like', FBAuth, likeScream);
+app.get('/scream/:screamId/unlike', FBAuth, unlikeScream);
 
 
-// TODO go to firebase and enable authentication
-// TODO in /functions folder  run npm install --save firebase
-const  firebaseConfig = {
-    apiKey: "AIzaSyCiiHPBO8CxoW6o5O-tqHu-sH2RuY2UcgA",
-    authDomain: "flutter-2630c.firebaseapp.com",
-    databaseURL: "https://flutter-2630c.firebaseio.com",
-    projectId: "flutter-2630c",
-    storageBucket: "flutter-2630c.appspot.com",
-    messagingSenderId: "1016933699175",
-    appId: "1:1016933699175:web:7999dcb8fe3579370a4ec2",
-    measurementId: "G-ZQQ3KZ7MPV"
-  };
-
-  const firebase= require('firebase');
-  firebase.initializeApp(firebaseConfig);
-
-const db = admin.firestore();
 
 
-app.get('/screams', (req, res)=>{
-    db
-    .collection('screams')
-    .orderBy('createdAt', 'desc')
-    .get()
-    .then((data)=>{
-        let screams =[];
-        data.forEach((doc) => {
-            screams.push({
-               screamId: doc.id,
-               body:doc.data().body,
-               userHandle:doc.data().userHandle,
-               createdAt:doc.data().createdAt,
+
+exports.api = functions.region('europe-west3').https.onRequest(app);
+
+// ======================================================================|
+// TODO change db to allow read, write :if false; on vid-13 min-24:54
+// TODO features to add
+// , report   1)Comment, 2) review, 3)
+// comment on comment
+// shop blog  
+
+// ======================================================================|
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+
+// |================================================================================|
+// |=================  -----------  triggered Functions ----------  ================|
+// |================================================================================|
+
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+//                 ||                                       ||
+
+//  --------  Like Notification-------------
+exports.createNotificationOnLike = functions.region('europe-west3').firestore.document(`likes/{id}`)
+.onCreate((snapshot)=>{
+
+    return db.doc(`/screams/${snapshot.data().screamId}`).get()
+    .then(doc =>{
+        if(doc.exists && doc.data().userName !=snapshot.data().userName){
+            return db.doc(`/notifications/${snapshot.id}`).set({
+                createdAt: new Date().toISOString(),
+                recipient: doc.data().userHandle,
+                sender:snapshot.data().userHandle,
+                type: 'like',
+                read:false,
+                screamId:doc.id
             });
-        });
-        return res.json(screams);
+        }
     })
-    .catch((err)=>console.error(err));
-})
-
-
-// FBAuth is a middleWare 
-const FBAuth = (req, res, next)=>{
-    let idToken;
-    if(req.headers.authorization && req.headers.authorization.startsWith('Bearer ')){
-        idToken= req.headers.authorization.split('Bearer ')[1];
-
-    }else{
-        console.error('No token found')
-        return res.status(403).json({error:'Unauthorized'});
-    }
-
-
-    // TODO u must know how you can manualy authenticate tokens
-    admin.auth().verifyIdToken(idToken)
-    .then(decodedToken=>{
-        // FIXME what is req.user
-        req.user =decodedToken;
-        console.log(decodedToken);
-        return db.collection('users')
-        .where('userId', '==', req.user.uid)
-        .limit(1)
-        .get();
-    })
-    .then(data=>{
-        req.user.handle = data.docs[0].data().handle;
-        return next();
-    })
-    .catch(err=>{
-        console.error('error while verifying token')
-        // because the error is a json
-        return res.status(403).json(err)
-    })
-}
-
-
-
-//  ==================
-// Post scream 
-
-app.post('/scream', FBAuth,(req, res)=>{
-    const newScream ={
-        body:req.body.body,
-        userHandle:req.body.handle,
-        createdAt:new Date().toISOString()
-    };
-
-
-    db
-    .collection('screams')
-    .add(newScream)
-    .then((doc)=>{
-        
-         res.json({message:`document ${doc.id} created succesfully`});
-    })
+    // .then(()=>{
+    //     return;
+    // })
     .catch((err)=>{
-        res.status(400).json({error:'some thing went wrong'});
         console.error(err);
+        return;
+    })
+});
+
+// -------------- Delete Like Notification ----------------
+exports.deleteNotificationsOnUnLike= functions
+.region("europe-west3")
+.firestore.document(`like/{id}`)
+.onDelete((snapshot)=>{
+    return db.doc(`/notifications/${snapshot.id}`).delete()
+   
+    .catch((err)=>{
+        console.error(err);
+        return;
     });
 
+});
 
-})
+//  -------------- Comment Notification --------------------
+exports.createNotificationOnComment = functions
+.region('europe-west3')
+.firestore.document(`comments/{id}`)
+.onCreate((snapshot) =>{
 
-const isEmpty= (string)=>{
-    if(string.trim()=='') return true;
-    else return false;
-}
-const isEmail = (email)=>{
-    const regEx = /^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
-    if (email.match(regEx)) return true;
-    else return false;
-}
-
-
-// ===================
-//  SignUp route
-
-app.post('/signup', (req, res)=>{
-
-    
-    const newUser ={
-        email:req.body.email,
-        password:req.body.password,
-        confirmPassword:req.body.confirmPassword,
-        handle:req.body.handle,
-       
-    };
-
-    let errors ={};
-
-    if (isEmpty(newUser.email)){
-        errors.email= 'Email can not be Empty'
-    }else if(!isEmail(newUser.email)){
-        errors.email =' Must be a valid Email adress'
-    }
-
-    if (isEmpty(newUser.password)) errors.password= 'password can not be Empty'    
-    if (isEmpty(newUser.handle)) errors.handle= 'handle can not be Empty'    
-    if(newUser.password!== newUser.confirmPassword) errors.password = 'password must match'
-
-    if(Object.keys(errors).length> 0 ) return res.status(400).json(errors);
-
-    
-
-    let token, userIDs;
-    // checks if the user handles exists then create user in the authentication part
-    db.doc(`/users/${newUser.handle}`).get()
-    .then(doc=>{
-        if(doc.exists){
-            return res.status(400).json({handle:'HANDLE_EXISTS'});
-        }else{
-            return firebase.auth().createUserWithEmailAndPassword(newuser.email, newUser.password);
+    return db.doc(`/screams/${snapshot.data().screamId}`).get()
+    .then(doc =>{
+        if(doc.exists && doc.data().userName !=snapshot.data().userName){
+            return db.doc(`/notifications/${snapshot.id}`).set({
+                createdAt: new Date().toISOString(),
+                recipient: doc.data().userHandle,
+                sender:snapshot.data().userHandle,
+                type: 'comment',
+                read:false,
+                screamId:doc.id
+            });
         }
     })
-  
-  .then((data=>{
-    userIDs= data.user.uid;
-    return data.user.getIdToken();
-       
-    }))
-    // create user in the user database 
-    .then((idToken)=>{
-        token=idToken;
-        const userCredentials ={
-
-            email:newUser.email,
-            createdAt:new Date().toISOString(),
-            handle:newUser.handle,
-            userId:userIDs
-           
-        };
-        return db.doc(`/users/${newUser.handle}`).set(userCredentials);
-
-    }).then(()=>{
-        return res.status(201).json({token});
-
-    })
+    
     .catch((err)=>{
         console.error(err);
-        if (err.code==='auth/email-already-in-use'){
-            return res.status(400).json({handle:'EMAIL_EXISTS'});
-        }
-        return res.status(500).json({error:err.code});
-        
+        return;
     });
 })
 
-// ================
-// login route
+exports.onUserImageChange = functions.region('europe-west3')
+.firestore.document('/users/{userId}')
+.onUpdate((change)=>{
+    console.log(change.before.data());
+    console.log(change.after.data());
 
-app.post('/login', (req, res)=>{
-    const user = {
-        email: req.body.email,
-        password:req.body.password
-    }
+   if(change.before.data().imageUrl!=change.after.data().imageUrl){
+    let batch = db.batch();
+    return db.collection('screams').where('userName', '==', chandge.before.data().userName).get()
 
-    //  ==========-----validating fields ------------=========
-
-    const errors={
-
-    }
-
-    if(isEmpty(user.email)){
-        errors.email= 'email can not be empty'
-    }else if(!isEmail(user.email)){
-        errors.email = 'email must be valid'
-    }
-
-    if(isEmpty(user.password)) errors.password= 'password can not be empty'
-    if(isEmail(user.email)) errors.email= ''
-
-    if(Object.keys(errors).length> 0 ) return res.status(400).json(errors);
-
-    firebase.auth().signInWithEmailAndPassword(user.email, user.password)
-    .then(data=>{
-        return data.user.getIdToken();
+    .then((data)=>{
+        data.forEach(doc=>{
+            const scream = db.doc(`/screams/${doc.id}`);
+        batch.update(scream, {userImage:change.after.data().imageUrl})
+        })
+        return batch.commit();
+        
     })
-    .then(token =>{
-        return res.json({token})
-    })
-    .catch(err=>{
+    .catch((err)=>{
         console.error(err);
-        if(err.code==='auth/wrong-password'){
-            return res.status(403).json({general: 'Wrong credentials, please try again'});
-        }else
-        res.status(500).json({error:err.code});
+        return;
+    });
+
+   } else return true;
+
+});
+
+
+exports.onScreamDelete = functions
+    .region('europe-west3')
+    .firestore.document('/screams/{screamId}')
+    .onDelete((snapshot, context) => {
+        const screamId = context.params.screamId;
+        const batch = db.batch();
+
+        return db.collection('comments').where('screamId', '==', screamId).get()
+            .then(data => {
+                data.forEach(doc => {
+                    batch.delete(db.doc(`/comments/${doc.id}`));
+                })
+                return db.collection('likes').where('screamId', '==', screamId).get()
+            })
+            .then(data => {
+                data.forEach(doc => {
+                    batch.delete(db.doc(`/likes/${doc.id}`));
+                })
+                return db.collection('notifications').where('screamId', '==', screamId).get()
+
+            })
+            .then(data => {
+                data.forEach(doc => {
+                    batch.delete(db.doc(`/notifications/${doc.id}`));
+                })
+                return batch.commit();
+            })
+            .catch((err)=>{
+                console.error(err);
+              
+            });
     })
-
-
-
-
-
-})
-
-exports.api = functions.region('europe-west1').https.onRequest(app);
